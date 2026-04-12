@@ -1,0 +1,48 @@
+---
+- name: Check if Wireshark is already installed
+  ansible.builtin.command: dpkg-query -W {{ wireshark_package_name }}
+  register: wireshark_installed
+  failed_when: false
+  changed_when: false
+
+- name: Pre-configure wireshark-common to allow non-superusers to capture packets
+  ansible.builtin.debconf:
+    name: wireshark-common
+    question: wireshark-common/install-setuid
+    value: "true"
+    vtype: boolean
+  become: true
+  when: wireshark_installed.rc != 0
+
+- name: Install Wireshark
+  ansible.builtin.apt:
+    name: "{{ wireshark_package_name }}"
+    state: present
+  become: true
+  when: wireshark_installed.rc != 0
+
+- name: Reconfigure wireshark-common (sets dumpcap group + permissions)
+  ansible.builtin.command: dpkg-reconfigure -f noninteractive wireshark-common
+  become: true
+  changed_when: false
+  when: wireshark_installed.rc != 0
+
+- name: Ensure wireshark group exists
+  ansible.builtin.group:
+    name: "{{ wireshark_group }}"
+    state: present
+  become: true
+
+- name: Add user to wireshark group (to run Wireshark without root)
+  ansible.builtin.user:
+    name: "{{ ansible_user }}"
+    groups: "{{ wireshark_group }}"
+    append: true
+  become: true
+
+- name: Set capabilities for dumpcap
+  community.general.capabilities:
+    path: /usr/bin/dumpcap
+    capability: cap_net_raw,cap_net_admin+eip
+    state: present
+  become: true
